@@ -6,8 +6,6 @@ import kotlinx.coroutines.flow.StateFlow
 import me.magnum.melonds.domain.model.*
 import me.magnum.melonds.domain.model.camera.DSiCameraSourceType
 import me.magnum.melonds.domain.model.input.SoftInputBehaviour
-import me.magnum.melonds.domain.model.render.RenderStrategy
-import me.magnum.melonds.domain.model.rewind.RewindWindowPosition
 import me.magnum.melonds.domain.model.rom.Rom
 import me.magnum.melonds.ui.Theme
 import java.util.UUID
@@ -18,7 +16,6 @@ interface SettingsRepository {
     fun getTheme(): Theme
     fun getFastForwardSpeedMultiplier(): Float
     fun isRewindEnabled(): Boolean
-    fun getRewindWindowPosition(): RewindWindowPosition
     fun isSustainedPerformanceModeEnabled(): Boolean
 
     fun getRomSearchDirectories(): Array<Uri>
@@ -38,7 +35,6 @@ interface SettingsRepository {
     fun getVideoInternalResolutionScaling(): Flow<Int>
     fun getVideoFiltering(): Flow<VideoFiltering>
     fun isThreadedRenderingEnabled(): Flow<Boolean>
-    fun getRenderStrategy(): Flow<RenderStrategy>
     fun getFpsCounterPosition(): FpsCounterPosition
     fun getDSiCameraSource(): DSiCameraSourceType
     fun getDSiCameraStaticImage(): Uri?
@@ -58,6 +54,7 @@ interface SettingsRepository {
     fun getControllerConfiguration(): ControllerConfiguration
     fun observeControllerConfiguration(): StateFlow<ControllerConfiguration>
     fun getSelectedLayoutId(): UUID
+    fun getLayoutPresetId(preset: Int): UUID?
     fun getSoftInputBehaviour(): Flow<SoftInputBehaviour>
     fun isTouchHapticFeedbackEnabled(): Flow<Boolean>
     fun getTouchHapticFeedbackStrength(): Int
@@ -85,6 +82,7 @@ interface SettingsRepository {
     fun setRomSortingMode(sortingMode: SortingMode)
     fun setRomSortingOrder(sortingOrder: SortingOrder)
     fun setSelectedLayoutId(layoutId: UUID)
+    fun setLayoutPresetId(preset: Int, layoutId: UUID?)
 
     fun observeRenderConfiguration(): Flow<RendererConfiguration>
 }

@@ -1,7 +1,6 @@
 package me.magnum.melonds.ui.emulator
 
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,7 +12,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -31,12 +29,10 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import me.magnum.melonds.MelonEmulator
 import me.magnum.melonds.common.romprocessors.RomFileProcessorFactory
 import me.magnum.melonds.common.runtime.ScreenshotFrameBufferProvider
@@ -86,8 +82,6 @@ import me.magnum.melonds.ui.emulator.model.ToastEvent
 import me.magnum.melonds.ui.emulator.rewind.model.RewindSaveState
 import me.magnum.melonds.ui.emulator.rom.RomPauseMenuOption
 import me.magnum.melonds.utils.EventSharedFlow
-import me.magnum.rcheevosapi.exception.UserTokenExpiredException
-import me.magnum.rcheevosapi.model.RAUserAuth
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.coroutines.CoroutineContext
@@ -124,6 +118,9 @@ class EmulatorViewModel @Inject constructor(
 
     private val _layout = MutableStateFlow<LayoutConfiguration?>(null)
 
+    // Layout selected at runtime through the layout preset hotkey. Takes priority over the global and ROM layouts for the current session
+    private val layoutPresetOverrideId = MutableStateFlow<UUID?>(null)
+
     private val _currentLayout = uiLayoutProvider.currentLayout.shareIn(viewModelScope, SharingStarted.Lazily)
 
     private val _runtimeLayout = MutableStateFlow<RuntimeInputLayoutConfiguration?>(null)
@@ -152,8 +149,8 @@ class EmulatorViewModel @Inject constructor(
     private val _toastEvent = EventSharedFlow<ToastEvent>()
     val toastEvent = _toastEvent.asSharedFlow()
 
-    private val _raIntegrationEvent = Channel<RAIntegrationEvent>(Channel.UNLIMITED)
-    val integrationEvent = _raIntegrationEvent.receiveAsFlow()
+    private val _raIntegrationEvent = EventSharedFlow<RAIntegrationEvent>()
+    val integrationEvent = _raIntegrationEvent.asSharedFlow()
 
     val pendingSubmissionsSummary = retroAchievementsSubmissionHandler.getPendingSubmissionsSummaryFlow()
 
@@ -340,8 +337,8 @@ class EmulatorViewModel @Inject constructor(
     fun onCheatsChanged() {
         val rom = (_emulatorState.value as? EmulatorState.RunningRom)?.rom ?: return
 
-        sessionCoroutineScope.launch {
-            getRomInfo(rom)?.let {
+        getRomInfo(rom)?.let {
+            sessionCoroutineScope.launch {
                 val cheats = getRomEnabledCheats(it)
                 emulatorManager.updateCheats(cheats)
             }
@@ -440,15 +437,13 @@ class EmulatorViewModel @Inject constructor(
                     RomPauseMenuOption.REWIND -> {
                         sessionCoroutineScope.launch {
                             val rewindWindow = emulatorManager.getRewindWindow()
-                            _uiEvent.emit(EmulatorUiEvent.ShowRewindWindow(rewindWindow, settingsRepository.getRewindWindowPosition()))
+                            _uiEvent.emit(EmulatorUiEvent.ShowRewindWindow(rewindWindow))
                         }
                     }
                     RomPauseMenuOption.CHEATS -> {
                         (_emulatorState.value as? EmulatorState.RunningRom)?.let {
-                            sessionCoroutineScope.launch {
-                                getRomInfo(it.rom)?.let { romInfo ->
-                                    _uiEvent.tryEmit(EmulatorUiEvent.OpenScreen.CheatsScreen(romInfo))
-                                }
+                            getRomInfo(it.rom)?.let { romInfo ->
+                                _uiEvent.tryEmit(EmulatorUiEvent.OpenScreen.CheatsScreen(romInfo))
                             }
                         }
                     }
@@ -484,7 +479,7 @@ class EmulatorViewModel @Inject constructor(
         sessionCoroutineScope.launch {
             emulatorManager.pauseEmulator()
             val rewindWindow = emulatorManager.getRewindWindow()
-            _uiEvent.emit(EmulatorUiEvent.ShowRewindWindow(rewindWindow, settingsRepository.getRewindWindowPosition()))
+            _uiEvent.emit(EmulatorUiEvent.ShowRewindWindow(rewindWindow))
         }
     }
 
@@ -650,6 +645,7 @@ class EmulatorViewModel @Inject constructor(
         _mainScreenBackground.value = RuntimeBackground.None
         _secondaryScreenBackground.value = RuntimeBackground.None
         _layout.value = null
+        layoutPresetOverrideId.value = null
     }
 
     private fun startObservingEmulatorEvents() {
@@ -727,7 +723,7 @@ class EmulatorViewModel @Inject constructor(
         }
 
         sessionCoroutineScope.launch {
-            combine(layoutFlow, ensureEmulatorIsRunning()) { layout, _ ->
+            combine(applyLayoutPresetOverride(layoutFlow), ensureEmulatorIsRunning()) { layout, _ ->
                 layout
             }.collect(_layout)
         }
@@ -736,7 +732,7 @@ class EmulatorViewModel @Inject constructor(
     private fun startObservingRendererConfiguration() {
         sessionCoroutineScope.launch {
             settingsRepository.observeRenderConfiguration().collectLatest {
-                _runtimeRendererConfiguration.value = RuntimeRendererConfiguration(it.videoFiltering, it.resolutionScaling, it.renderStrategy)
+                _runtimeRendererConfiguration.value = RuntimeRendererConfiguration(it.videoFiltering, it.resolutionScaling)
             }
         }
     }
@@ -745,7 +741,7 @@ class EmulatorViewModel @Inject constructor(
         _layout.value = null
 
         sessionCoroutineScope.launch {
-            combine(getGlobalLayoutFlow(), ensureEmulatorIsRunning()) { layout, _ ->
+            combine(applyLayoutPresetOverride(getGlobalLayoutFlow()), ensureEmulatorIsRunning()) { layout, _ ->
                 layout
             }.collect(_layout)
         }
@@ -760,6 +756,42 @@ class EmulatorViewModel @Inject constructor(
         }
     }
 
+    private fun applyLayoutPresetOverride(baseLayoutFlow: Flow<LayoutConfiguration>): Flow<LayoutConfiguration> {
+        return layoutPresetOverrideId.flatMapLatest { overrideId ->
+            if (overrideId == null) {
+                baseLayoutFlow
+            } else {
+                // If the preset layout stops existing, fall back to the base layout
+                layoutsRepository.observeLayout(overrideId)
+                    .onCompletion {
+                        emitAll(baseLayoutFlow)
+                    }
+            }
+        }
+    }
+
+    /**
+     * Alternates between the two layout presets configured in the settings. If the current layout is preset 1, switches to preset 2. In any other
+     * case, switches to preset 1.
+     */
+    fun toggleLayoutPreset() {
+        val preset1 = settingsRepository.getLayoutPresetId(1)
+        val preset2 = settingsRepository.getLayoutPresetId(2)
+        if (preset1 == null || preset2 == null) {
+            _toastEvent.tryEmit(ToastEvent.LayoutPresetsNotConfigured)
+            return
+        }
+
+        val currentLayoutId = layoutPresetOverrideId.value ?: _layout.value?.id
+        if (currentLayoutId == preset1) {
+            layoutPresetOverrideId.value = preset2
+            _toastEvent.tryEmit(ToastEvent.LayoutPreset2Selected)
+        } else {
+            layoutPresetOverrideId.value = preset1
+            _toastEvent.tryEmit(ToastEvent.LayoutPreset1Selected)
+        }
+    }
+
     private fun getGlobalLayoutFlow(): Flow<LayoutConfiguration> {
         return settingsRepository.observeSelectedLayoutId()
             .flatMapLatest {
@@ -770,9 +802,9 @@ class EmulatorViewModel @Inject constructor(
             }
     }
 
-    private suspend fun getRomInfo(rom: Rom): RomInfo? = withContext(Dispatchers.IO) {
+    private fun getRomInfo(rom: Rom): RomInfo? {
         val fileRomProcessor = romFileProcessorFactory.getFileRomProcessorForDocument(rom.uri)
-        fileRomProcessor?.getRomInfo(rom)
+        return fileRomProcessor?.getRomInfo(rom)
     }
 
     private fun getRomSaveStateSlots(rom: Rom): List<SaveStateSlot> {
@@ -796,11 +828,8 @@ class EmulatorViewModel @Inject constructor(
     }
 
     private suspend fun getRomAchievementData(rom: Rom): GameAchievementData {
-        val userAuth = retroAchievementsRepository.getUserAuthentication()
-        when (userAuth) {
-            is RAUserAuth.Authenticated -> { /* no-op */ }
-            is RAUserAuth.AuthenticationExpired -> return GameAchievementData.withDisabledRetroAchievementsIntegration(GameAchievementData.IntegrationStatus.DISABLED_LOGIN_EXPIRED)
-            null -> return GameAchievementData.withDisabledRetroAchievementsIntegration(GameAchievementData.IntegrationStatus.DISABLED_NOT_LOGGED_IN)
+        if (!retroAchievementsRepository.isUserAuthenticated()) {
+            return GameAchievementData.withDisabledRetroAchievementsIntegration(GameAchievementData.IntegrationStatus.DISABLED_NOT_LOGGED_IN)
         }
 
         return retroAchievementsRepository.getUserGameData(rom.retroAchievementsHash, emulatorSession.isRetroAchievementsHardcoreModeEnabled).fold(
@@ -935,9 +964,7 @@ class EmulatorViewModel @Inject constructor(
             emulatorSession.updateRetroAchievementsIntegrationStatus(achievementData.retroAchievementsIntegrationStatus)
             if (!achievementData.isRetroAchievementsIntegrationEnabled) {
                 if (achievementData.retroAchievementsIntegrationStatus == GameAchievementData.IntegrationStatus.DISABLED_LOAD_ERROR) {
-                    _raIntegrationEvent.trySend(RAIntegrationEvent.Failed(achievementData.icon))
-                } else if (achievementData.retroAchievementsIntegrationStatus == GameAchievementData.IntegrationStatus.DISABLED_LOGIN_EXPIRED) {
-                    _raIntegrationEvent.trySend(RAIntegrationEvent.LoginExpired(achievementData.icon))
+                    _raIntegrationEvent.tryEmit(RAIntegrationEvent.Failed(achievementData.icon))
                 }
 
                 return@launch
@@ -950,11 +977,7 @@ class EmulatorViewModel @Inject constructor(
                 val isHardcoreModeEnabled = emulatorSession.isRetroAchievementsHardcoreModeEnabled
                 val startResult = retroAchievementsRepository.startSession(rom.retroAchievementsHash, isHardcoreModeEnabled)
                 if (startResult.isFailure) {
-                    if (startResult.exceptionOrNull() is UserTokenExpiredException) {
-                        _raIntegrationEvent.trySend(RAIntegrationEvent.LoginExpired(achievementData.icon))
-                    } else {
-                        _raIntegrationEvent.trySend(RAIntegrationEvent.Failed(achievementData.icon))
-                    }
+                    _raIntegrationEvent.tryEmit(RAIntegrationEvent.Failed(achievementData.icon))
                 } else {
                     launch {
                         retroAchievementsSubmissionHandler.startEmulatorSession().collect(_achievementsEvent)
@@ -962,7 +985,7 @@ class EmulatorViewModel @Inject constructor(
 
                     emulatorManager.setupRetroAchievements(achievementData)
                     if (achievementData.hasAchievements) {
-                        _raIntegrationEvent.trySend(
+                        _raIntegrationEvent.tryEmit(
                             RAIntegrationEvent.Loaded(
                                 icon = achievementData.icon,
                                 unlockedAchievements = achievementData.unlockedAchievementCount,
@@ -970,7 +993,7 @@ class EmulatorViewModel @Inject constructor(
                             )
                         )
                     } else {
-                        _raIntegrationEvent.trySend(RAIntegrationEvent.LoadedNoAchievements(achievementData.icon))
+                        _raIntegrationEvent.tryEmit(RAIntegrationEvent.LoadedNoAchievements(achievementData.icon))
                     }
 
                     delay(30.seconds)

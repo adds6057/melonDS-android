@@ -1,15 +1,49 @@
 package me.magnum.melonds.ui.emulator.input
 
+import android.os.Handler
+import android.os.Looper
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import me.magnum.melonds.domain.model.ControllerConfiguration
+import me.magnum.melonds.domain.model.Input
 import me.magnum.melonds.domain.model.InputConfig
 import kotlin.math.absoluteValue
 
 class InputProcessor(private val controllerConfiguration: ControllerConfiguration, private val systemInputListener: IInputListener, private val frontendInputListener: IInputListener) : INativeInputListener {
 
     private val axisStates: Map<Axis, AxisState>
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val comboEngine: HotkeyComboEngine? = controllerConfiguration.getKeyCombos().takeIf { it.isNotEmpty() }?.let { keyCombos ->
+        HotkeyComboEngine(
+            combos = keyCombos.map { HotkeyComboEngine.Combo(it.first, it.second) },
+            scheduler = object : HotkeyComboEngine.Scheduler {
+                override fun postDelayed(delayMs: Long, action: () -> Unit): HotkeyComboEngine.Cancellable {
+                    val runnable = Runnable(action)
+                    handler.postDelayed(runnable, delayMs)
+                    return HotkeyComboEngine.Cancellable { handler.removeCallbacks(runnable) }
+                }
+            },
+            listener = object : HotkeyComboEngine.Listener {
+                override fun onForwardKeyPressed(keyCode: Int) {
+                    dispatchKey(keyCode, KeyEvent.ACTION_DOWN)
+                }
+
+                override fun onForwardKeyReleased(keyCode: Int) {
+                    dispatchKey(keyCode, KeyEvent.ACTION_UP)
+                }
+
+                override fun onHotkeyPressed(input: Input) {
+                    frontendInputListener.onKeyPress(input)
+                }
+
+                override fun onHotkeyReleased(input: Input) {
+                    frontendInputListener.onKeyReleased(input)
+                }
+            },
+        )
+    }
 
     init {
         val axis = controllerConfiguration.inputMapper.flatMap { inputConfig ->
@@ -23,29 +57,40 @@ class InputProcessor(private val controllerConfiguration: ControllerConfiguratio
         axisStates = axis.associateWith { AxisState(0f, false) }
     }
 
+    /**
+     * Must be called when this processor is discarded so that pending combo operations are cancelled and no key is left stuck in the game.
+     */
+    fun release() {
+        comboEngine?.cancelAll()
+    }
+
     override fun onKeyEvent(keyEvent: KeyEvent): Boolean {
-        val input = controllerConfiguration.keyToInput(keyEvent.keyCode) ?: return false
-        if (input.isSystemInput) {
-            when (keyEvent.action) {
-                KeyEvent.ACTION_DOWN -> {
-                    systemInputListener.onKeyPress(input)
-                    return true
-                }
-                KeyEvent.ACTION_UP -> {
-                    systemInputListener.onKeyReleased(input)
-                    return true
-                }
+        val engine = comboEngine
+        if (engine != null) {
+            val handledByCombo = when (keyEvent.action) {
+                KeyEvent.ACTION_DOWN -> engine.onKeyDown(keyEvent.keyCode)
+                KeyEvent.ACTION_UP -> engine.onKeyUp(keyEvent.keyCode)
+                else -> false
             }
-        } else {
-            when (keyEvent.action) {
-                KeyEvent.ACTION_DOWN -> {
-                    frontendInputListener.onKeyPress(input)
-                    return true
-                }
-                KeyEvent.ACTION_UP -> {
-                    frontendInputListener.onKeyReleased(input)
-                    return true
-                }
+            if (handledByCombo) {
+                return true
+            }
+        }
+
+        return dispatchKey(keyEvent.keyCode, keyEvent.action)
+    }
+
+    private fun dispatchKey(keyCode: Int, action: Int): Boolean {
+        val input = controllerConfiguration.keyToInput(keyCode) ?: return false
+        val listener = if (input.isSystemInput) systemInputListener else frontendInputListener
+        when (action) {
+            KeyEvent.ACTION_DOWN -> {
+                listener.onKeyPress(input)
+                return true
+            }
+            KeyEvent.ACTION_UP -> {
+                listener.onKeyReleased(input)
+                return true
             }
         }
         return false

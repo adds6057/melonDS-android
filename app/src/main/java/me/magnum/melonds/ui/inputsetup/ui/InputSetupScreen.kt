@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import me.magnum.melonds.R
@@ -85,7 +86,11 @@ private fun InputSetupScreenContent(
     onCancelInputConfiguration: () -> Unit,
     onBackClick: () -> Unit,
 ) {
+    val systemUiController = rememberSystemUiController()
     val focusManager = LocalFocusManager.current
+
+    systemUiController.setStatusBarColor(MaterialTheme.colors.primaryVariant)
+    systemUiController.isNavigationBarContrastEnforced = false
 
     BackHandler(enabled = inputUnderConfiguration != null) {
         onCancelInputConfiguration()
@@ -170,6 +175,11 @@ private fun Input(
                             is InputConfig.Assignment.Key -> {
                                 val keyCodeString = KeyEvent.keyCodeToString(assignment.keyCode)
                                 keyCodeString.replace("KEYCODE", "").replace("_", " ").trim()
+                            }
+                            is InputConfig.Assignment.KeyCombo -> {
+                                assignment.keyCodes.joinToString(" + ") { keyCode ->
+                                    KeyEvent.keyCodeToString(keyCode).replace("KEYCODE", "").replace("_", " ").trim()
+                                }
                             }
                             is InputConfig.Assignment.Axis -> {
                                 val axisString = MotionEvent.axisToString(assignment.axisCode)
@@ -256,6 +266,7 @@ private fun getInputName(input: Input): String? {
         Input.QUICK_SAVE -> R.string.input_quick_save
         Input.QUICK_LOAD -> R.string.input_quick_load
         Input.REWIND -> R.string.rewind
+        Input.TOGGLE_LAYOUT_PRESET -> R.string.input_toggle_layout_preset
         else -> return null
     }
 

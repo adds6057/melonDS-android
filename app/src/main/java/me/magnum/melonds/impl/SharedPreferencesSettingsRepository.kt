@@ -38,7 +38,6 @@ import me.magnum.melonds.domain.model.FpsCounterPosition
 import me.magnum.melonds.domain.model.MacAddress
 import me.magnum.melonds.domain.model.MicSource
 import me.magnum.melonds.domain.model.RendererConfiguration
-import me.magnum.melonds.domain.model.rewind.RewindWindowPosition
 import me.magnum.melonds.domain.model.RomIconFiltering
 import me.magnum.melonds.domain.model.SaveStateLocation
 import me.magnum.melonds.domain.model.SizeUnit
@@ -49,7 +48,6 @@ import me.magnum.melonds.domain.model.VideoRenderer
 import me.magnum.melonds.domain.model.camera.DSiCameraSourceType
 import me.magnum.melonds.domain.model.input.SoftInputBehaviour
 import me.magnum.melonds.domain.model.layout.LayoutConfiguration
-import me.magnum.melonds.domain.model.render.RenderStrategy
 import me.magnum.melonds.domain.model.rom.Rom
 import me.magnum.melonds.domain.repositories.SettingsRepository
 import me.magnum.melonds.impl.dtos.input.ControllerConfigurationDto
@@ -100,10 +98,9 @@ class SharedPreferencesSettingsRepository(
             getVideoRenderer(),
             getVideoFiltering(),
             isThreadedRenderingEnabled(),
-            getRenderStrategy(),
             getVideoInternalResolutionScaling(),
-        ) { renderer, filtering, threadedRenderingEnabled, renderStrategy, resolutionScaling ->
-            RendererConfiguration(renderer, filtering, threadedRenderingEnabled, renderStrategy, resolutionScaling)
+        ) { renderer, filtering, threadedRenderingEnabled, resolutionScaling ->
+            RendererConfiguration(renderer, filtering, threadedRenderingEnabled, resolutionScaling)
         }.conflate().shareIn(preferencesCoroutineScope, SharingStarted.Lazily, replay = 1)
     }
 
@@ -185,11 +182,6 @@ class SharedPreferencesSettingsRepository(
 
     override fun isRewindEnabled(): Boolean {
         return preferences.getBoolean("enable_rewind", false)
-    }
-
-    override fun getRewindWindowPosition(): RewindWindowPosition {
-        val positionPreference = preferences.getString("rewind_window_position", "bottom")!!
-        return RewindWindowPosition.valueOf(positionPreference.uppercase())
     }
 
     override fun isSustainedPerformanceModeEnabled(): Boolean {
@@ -310,16 +302,6 @@ class SharedPreferencesSettingsRepository(
     override fun isThreadedRenderingEnabled(): Flow<Boolean> {
         return getOrCreatePreferenceSharedFlow("enable_threaded_rendering") {
             preferences.getBoolean("enable_threaded_rendering", true)
-        }
-    }
-
-    override fun getRenderStrategy(): Flow<RenderStrategy> {
-        return getOrCreatePreferenceSharedFlow("front_rendering") {
-            if (preferences.getBoolean("front_rendering", false)) {
-                RenderStrategy.FRONT_BUFFER_RENDERING
-            } else {
-                RenderStrategy.BACK_BUFFER_RENDERING
-            }
         }
     }
 
@@ -455,6 +437,16 @@ class SharedPreferencesSettingsRepository(
         return id?.let { UUID.fromString(it) } ?: LayoutConfiguration.DEFAULT_ID
     }
 
+    override fun getLayoutPresetId(preset: Int): UUID? {
+        return preferences.getString("layout_preset_${preset}_id", null)?.let {
+            try {
+                UUID.fromString(it)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
+    }
+
     override fun getSoftInputBehaviour(): Flow<SoftInputBehaviour> {
         return getOrCreatePreferenceSharedFlow("soft_input_behaviour") {
             val preference = preferences.getString("soft_input_behaviour", "hide_system_buttons_when_controller_connected")
@@ -582,6 +574,16 @@ class SharedPreferencesSettingsRepository(
     override fun setSelectedLayoutId(layoutId: UUID) {
         preferences.edit {
             putString("input_layout_id", layoutId.toString())
+        }
+    }
+
+    override fun setLayoutPresetId(preset: Int, layoutId: UUID?) {
+        preferences.edit {
+            if (layoutId == null) {
+                remove("layout_preset_${preset}_id")
+            } else {
+                putString("layout_preset_${preset}_id", layoutId.toString())
+            }
         }
     }
 

@@ -29,7 +29,9 @@ class InputSetupActivity : AppCompatActivity() {
     private val referenceAxisValues = mutableMapOf<Int, Float>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
+        enableEdgeToEdge(
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
 
         setContent {
@@ -62,6 +64,10 @@ class InputSetupActivity : AppCompatActivity() {
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (viewModel.inputUnderAssignment.value != null && event.isFromSource(InputDevice.SOURCE_CLASS_JOYSTICK)) {
+            if (viewModel.isCapturingKeyCombo()) {
+                // A key combination is being captured. Ignore axis movements until all keys are released
+                return true
+            }
             if (event.action == MotionEvent.ACTION_MOVE) {
                 val detectedAxis = referenceAxisValues.firstNotNullOfOrNull {
                     val currentValue = event.getAxisValue(it.key)
@@ -92,10 +98,13 @@ class InputSetupActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && viewModel.inputUnderAssignment.value != null) {
+        if (viewModel.inputUnderAssignment.value != null) {
             @SuppressLint("GestureBackNavigation")
             if (event.keyCode != KeyEvent.KEYCODE_BACK) {
-                viewModel.updateInputAssignedKey(event.keyCode)
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN -> viewModel.onAssignmentKeyDown(event.keyCode)
+                    KeyEvent.ACTION_UP -> viewModel.onAssignmentKeyUp(event.keyCode)
+                }
                 return true
             }
         }

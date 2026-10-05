@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.view.Display
@@ -61,9 +60,7 @@ import me.magnum.melonds.domain.model.SaveStateSlot
 import me.magnum.melonds.domain.model.layout.Insets
 import me.magnum.melonds.domain.model.layout.LayoutComponent
 import me.magnum.melonds.domain.model.layout.ScreenFold
-import me.magnum.melonds.domain.model.rewind.RewindWindowPosition
 import me.magnum.melonds.domain.model.rom.Rom
-import me.magnum.melonds.domain.model.rom.config.RomGbaSlotConfig
 import me.magnum.melonds.domain.model.ui.Orientation
 import me.magnum.melonds.extensions.insetsControllerCompat
 import me.magnum.melonds.extensions.setLayoutOrientation
@@ -77,7 +74,6 @@ import me.magnum.melonds.ui.cheats.CheatsActivity
 import me.magnum.melonds.ui.common.rom.EmulatorLaunchValidatorDelegate
 import me.magnum.melonds.ui.emulator.component.EmulatorOverlayTracker
 import me.magnum.melonds.ui.emulator.input.ConnectedControllerManager
-import me.magnum.melonds.ui.emulator.input.EmulatorMotionManager
 import me.magnum.melonds.ui.emulator.input.EmulatorRumbleManager
 import me.magnum.melonds.ui.emulator.input.FrontendInputHandler
 import me.magnum.melonds.ui.emulator.input.INativeInputListener
@@ -89,7 +85,6 @@ import me.magnum.melonds.ui.emulator.model.EmulatorUiEvent
 import me.magnum.melonds.ui.emulator.model.LaunchArgs
 import me.magnum.melonds.ui.emulator.model.PauseMenu
 import me.magnum.melonds.ui.emulator.model.RAEventUi
-import me.magnum.melonds.ui.emulator.model.RewindWindowState
 import me.magnum.melonds.ui.emulator.model.RumbleEvent
 import me.magnum.melonds.ui.emulator.model.RuntimeInputLayoutConfiguration
 import me.magnum.melonds.ui.emulator.model.ToastEvent
@@ -97,12 +92,13 @@ import me.magnum.melonds.ui.emulator.render.ChoreographerFrameRenderer
 import me.magnum.melonds.ui.emulator.render.ChoreographerFrameRendererFactory
 import me.magnum.melonds.ui.emulator.render.ExternalPresentation
 import me.magnum.melonds.ui.emulator.render.FrameRenderCoordinator
+import me.magnum.melonds.ui.emulator.rewind.EdgeSpacingDecorator
+import me.magnum.melonds.ui.emulator.rewind.RewindSaveStateAdapter
 import me.magnum.melonds.ui.emulator.rewind.model.RewindWindow
 import me.magnum.melonds.ui.emulator.rom.SaveStateAdapter
 import me.magnum.melonds.ui.emulator.ui.AchievementListDialog
 import me.magnum.melonds.ui.emulator.ui.AchievementUpdatesUi
 import me.magnum.melonds.ui.emulator.ui.PendingSubmissionsDialog
-import me.magnum.melonds.ui.emulator.ui.RewindWindowUi
 import me.magnum.melonds.ui.layouteditor.model.LayoutTarget
 import me.magnum.melonds.ui.settings.SettingsActivity
 import me.magnum.melonds.ui.theme.MelonTheme
@@ -189,7 +185,6 @@ class EmulatorActivity : AppCompatActivity() {
     private val connectedControllerManager = ConnectedControllerManager()
     private lateinit var emulatorLaunchValidatorDelegate: EmulatorLaunchValidatorDelegate
     private lateinit var emulatorRumbleManager: EmulatorRumbleManager
-    private lateinit var emulatorMotionManager: EmulatorMotionManager
     private lateinit var frameRenderCoordinator: FrameRenderCoordinator
     private lateinit var choreographerFrameRenderer: ChoreographerFrameRenderer
     private lateinit var mainScreenRenderer: DSRenderer
@@ -243,6 +238,10 @@ class EmulatorActivity : AppCompatActivity() {
         override fun onRewind() {
             viewModel.onOpenRewind()
         }
+
+        override fun onToggleLayoutPreset() {
+            viewModel.toggleLayoutPreset()
+        }
     }
     private val settingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.onSettingsChanged()
@@ -267,7 +266,10 @@ class EmulatorActivity : AppCompatActivity() {
         }
     }
 
-    private val rewindWindowState = mutableStateOf<RewindWindowState>(RewindWindowState.Hidden)
+    private val rewindSaveStateAdapter = RewindSaveStateAdapter {
+        viewModel.rewindToState(it)
+        closeRewindWindow()
+    }
     private val showAchievementList = mutableStateOf(false)
     private val showPendingSubmissionsDialog = mutableStateOf(false)
 
@@ -292,6 +294,7 @@ class EmulatorActivity : AppCompatActivity() {
         setupFullscreen()
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
             val insets = windowInsets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            binding.listRewind.setPadding(insets.left, 0, insets.right, insets.bottom)
             binding.textFps.updateLayoutParams<ConstraintLayout.LayoutParams> {
                 setMargins(insets.left, insets.top, insets.right, insets.bottom)
             }
@@ -318,7 +321,6 @@ class EmulatorActivity : AppCompatActivity() {
             }
         })
         emulatorRumbleManager = EmulatorRumbleManager(this, lifecycleScope, connectedControllerManager)
-        emulatorMotionManager = EmulatorMotionManager(this, lifecycleScope, connectedControllerManager)
         frameRenderCoordinator = FrameRenderCoordinator()
         choreographerFrameRenderer = ChoreographerFrameRendererFactory.createFrameRenderer(frameRenderCoordinator)
         melonTouchHandler = MelonTouchHandler()
@@ -329,6 +331,15 @@ class EmulatorActivity : AppCompatActivity() {
 
         binding.textFps.visibility = View.INVISIBLE
         binding.viewLayoutControls.setLayoutComponentViewBuilderFactory(RuntimeLayoutComponentViewBuilderFactory())
+        binding.layoutRewind.setOnClickListener {
+            closeRewindWindow()
+        }
+        binding.listRewind.apply {
+            val listLayoutManager = LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, true)
+            layoutManager = listLayoutManager
+            addItemDecoration(EdgeSpacingDecorator())
+            adapter = rewindSaveStateAdapter
+        }
         binding.viewLayoutControls.apply {
             setFrontendInputHandler(frontendInputHandler)
             setSystemInputHandler(melonTouchHandler)
@@ -351,7 +362,7 @@ class EmulatorActivity : AppCompatActivity() {
         updateOrientation(resources.configuration)
         disableScreenTimeOut()
 
-        binding.layoutCompose.setContent {
+        binding.layoutAchievement.setContent {
             MelonTheme {
                 val achievementsViewModel = viewModels<EmulatorRetroAchievementsViewModel>().value
 
@@ -362,15 +373,6 @@ class EmulatorActivity : AppCompatActivity() {
                 }
 
                 AchievementUpdatesUi(viewModel)
-
-                RewindWindowUi(
-                    state = rewindWindowState.value,
-                    onRewindSaveStateSelected = { state ->
-                        viewModel.rewindToState(state)
-                        closeRewindWindow()
-                    },
-                    onDismiss = ::closeRewindWindow,
-                )
 
                 if (showAchievementList.value) {
                     AchievementListDialog(
@@ -445,9 +447,6 @@ class EmulatorActivity : AppCompatActivity() {
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.runtimeRendererConfiguration.collectLatest {
-                    if (it != null) {
-                        frameRenderCoordinator.setRenderStrategy(it.renderStrategy)
-                    }
                     mainScreenRenderer.updateRendererConfiguration(it)
                     presentation?.updateRendererConfiguration(it)
                 }
@@ -482,6 +481,9 @@ class EmulatorActivity : AppCompatActivity() {
                         ToastEvent.CannotSwitchRetroAchievementsMode -> R.string.retro_achievements_relaunch_to_apply_settings to Toast.LENGTH_LONG
                         ToastEvent.GbaModeNotSupported -> R.string.emulator_stop_gba_mode_unsupported to Toast.LENGTH_SHORT
                         ToastEvent.InternalError -> R.string.emulator_stop_internal_error to Toast.LENGTH_LONG
+                        ToastEvent.LayoutPresetsNotConfigured -> R.string.layout_presets_not_configured to Toast.LENGTH_LONG
+                        ToastEvent.LayoutPreset1Selected -> R.string.layout_preset_1_selected to Toast.LENGTH_SHORT
+                        ToastEvent.LayoutPreset2Selected -> R.string.layout_preset_2_selected to Toast.LENGTH_SHORT
                     }
 
                     Toast.makeText(this@EmulatorActivity, message, duration).show()
@@ -507,7 +509,7 @@ class EmulatorActivity : AppCompatActivity() {
                             settingsLauncher.launch(settingsIntent)
                         }
                         is EmulatorUiEvent.ShowPauseMenu -> showPauseMenu(it.pauseMenu)
-                        is EmulatorUiEvent.ShowRewindWindow -> showRewindWindow(it.rewindWindow, it.windowPosition)
+                        is EmulatorUiEvent.ShowRewindWindow -> showRewindWindow(it.rewindWindow)
                         is EmulatorUiEvent.ShowRomSaveStates -> {
                             showSaveStateSlotsDialog(it.saveStates) { slot ->
                                 if (it.reason == EmulatorUiEvent.ShowRomSaveStates.Reason.SAVING) {
@@ -550,12 +552,10 @@ class EmulatorActivity : AppCompatActivity() {
                         }
                         is EmulatorState.ValidatingFirmware -> {
                             showLoadingState()
-                            emulatorMotionManager.stop()
                             emulatorLaunchValidatorDelegate.validateFirmware(it.consoleType)
                         }
                         is EmulatorState.ValidatingRom -> {
                             showLoadingState()
-                            emulatorMotionManager.stop()
                             emulatorLaunchValidatorDelegate.validateRom(it.rom)
                         }
                         EmulatorState.LoadingFirmware,
@@ -567,9 +567,6 @@ class EmulatorActivity : AppCompatActivity() {
                             binding.textLoading.isGone = true
                             binding.viewLayoutControls.isVisible = true
                             backPressedCallback.isEnabled = true
-                            if (it is EmulatorState.RunningRom) {
-                                startMotionManagerIfNeeded(it.rom)
-                            }
                         }
                         is EmulatorState.RomLoadError -> {
                             binding.viewLayoutControls.isInvisible = true
@@ -689,13 +686,7 @@ class EmulatorActivity : AppCompatActivity() {
         if (launchArgs == null)
             return
 
-        val currentState = viewModel.emulatorState.value
-        if (currentState.isRunning()) {
-            // If the same ROM/firmware is already running, ignore the intent
-            if (launchArgs.matchesRunningState(currentState)) {
-                return
-            }
-
+        if (viewModel.emulatorState.value.isRunning()) {
             viewModel.pauseEmulator(false)
 
             activeOverlays.addActiveOverlay(EmulatorOverlay.SWITCH_NEW_ROM_DIALOG)
@@ -722,7 +713,6 @@ class EmulatorActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         choreographerFrameRenderer.startRendering()
-        emulatorMotionManager.resume()
 
         if (!activeOverlays.hasActiveOverlays()) {
             disableScreenTimeOut()
@@ -739,13 +729,6 @@ class EmulatorActivity : AppCompatActivity() {
         window.insetsControllerCompat?.let {
             it.hide(WindowInsetsCompat.Type.navigationBars())
             it.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-    }
-
-    private fun startMotionManagerIfNeeded(rom: Rom) {
-        val gbaSlotConfig = rom.config.gbaSlotConfig
-        if (gbaSlotConfig is RomGbaSlotConfig.MotionPakHomebrew || gbaSlotConfig is RomGbaSlotConfig.MotionPakRetail) {
-            emulatorMotionManager.start()
         }
     }
 
@@ -839,22 +822,21 @@ class EmulatorActivity : AppCompatActivity() {
             topView?.onTop ?: false,
             bottomView?.onTop ?: false,
         )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val touchScreenArea = bottomView?.getRect()?.let {
-                val rect = android.graphics.Rect(it.x, it.y, it.right, it.bottom)
-                listOf(rect)
-            }
-            window?.systemGestureExclusionRects = touchScreenArea.orEmpty()
-        }
     }
 
     private fun setupInputHandling(controllerConfiguration: ControllerConfiguration) {
+        if (::nativeInputListener.isInitialized) {
+            (nativeInputListener as? InputProcessor)?.release()
+        }
         nativeInputListener = InputProcessor(controllerConfiguration, melonTouchHandler, frontendInputHandler)
     }
 
     private fun handleBackPressed() {
-        viewModel.pauseEmulator(true)
+        if (isRewindWindowOpen()) {
+            closeRewindWindow()
+        } else {
+            viewModel.pauseEmulator(true)
+        }
     }
 
     private fun showPauseMenu(pauseMenu: PauseMenu) {
@@ -898,6 +880,10 @@ class EmulatorActivity : AppCompatActivity() {
             return true
 
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    private fun isRewindWindowOpen(): Boolean {
+        return binding.root.currentState == R.id.rewind_visible
     }
 
     private fun showSaveStateSlotsDialog(slots: List<SaveStateSlot>, onSlotPicked: (SaveStateSlot) -> Unit) {
@@ -987,14 +973,15 @@ class EmulatorActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showRewindWindow(rewindWindow: RewindWindow, windowPosition: RewindWindowPosition) {
+    private fun showRewindWindow(rewindWindow: RewindWindow) {
         activeOverlays.addActiveOverlay(EmulatorOverlay.REWIND_WINDOW)
-        rewindWindowState.value = RewindWindowState.Visible(rewindWindow, windowPosition)
+        binding.root.transitionToState(R.id.rewind_visible)
+        rewindSaveStateAdapter.setRewindWindow(rewindWindow)
     }
 
     private fun closeRewindWindow() {
         activeOverlays.removeActiveOverlay(EmulatorOverlay.REWIND_WINDOW)
-        rewindWindowState.value = RewindWindowState.Hidden
+        binding.root.transitionToState(R.id.rewind_hidden)
         viewModel.resumeEmulator()
     }
 
@@ -1017,7 +1004,6 @@ class EmulatorActivity : AppCompatActivity() {
         super.onPause()
         enableScreenTimeOut()
         choreographerFrameRenderer.stopRendering()
-        emulatorMotionManager.pause()
         viewModel.pauseEmulator(false)
     }
 
@@ -1041,7 +1027,6 @@ class EmulatorActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        emulatorMotionManager.stop()
         frameRenderCoordinator.stop()
         presentation?.dismiss()
     }

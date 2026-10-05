@@ -21,6 +21,7 @@ class ControllerConfiguration(configList: List<InputConfig>) {
             Input.MICROPHONE,
             Input.RESET,
             Input.SWAP_SCREENS,
+            Input.TOGGLE_LAYOUT_PRESET,
             Input.QUICK_SAVE,
             Input.QUICK_LOAD,
             Input.REWIND,
@@ -42,6 +43,18 @@ class ControllerConfiguration(configList: List<InputConfig>) {
                 it.assignment.takeIf { it != InputConfig.Assignment.None },
                 it.altAssignment.takeIf { it != InputConfig.Assignment.None },
             )
+        }
+    }
+
+    /**
+     * Returns all the key combinations assigned to frontend inputs (hotkeys). Each pair contains the input and the set of key codes that must be
+     * held down simultaneously to trigger it.
+     */
+    fun getKeyCombos(): List<Pair<Input, Set<Int>>> {
+        return inputMapper.filter { !it.input.isSystemInput }.flatMap { config ->
+            listOf(config.assignment, config.altAssignment).mapNotNull { assignment ->
+                (assignment as? InputConfig.Assignment.KeyCombo)?.takeIf { it.keyCodes.size >= 2 }?.let { config.input to it.keyCodes }
+            }
         }
     }
 

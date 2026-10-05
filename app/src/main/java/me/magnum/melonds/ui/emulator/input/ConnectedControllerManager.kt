@@ -101,6 +101,7 @@ class ConnectedControllerManager : InputManager.InputDeviceListener {
                             when(assignment) {
                                 is InputConfig.Assignment.Axis -> managedControllers.any { it.getMotionRange(assignment.axisCode) != null }
                                 is InputConfig.Assignment.Key -> managedControllers.any { it.hasKeys(assignment.keyCode)[0] }
+                                is InputConfig.Assignment.KeyCombo -> managedControllers.any { it.hasKeys(*assignment.keyCodes.toIntArray()).all { supported -> supported } }
                                 InputConfig.Assignment.None -> false
                             }
                         }
@@ -148,6 +149,7 @@ class ConnectedControllerManager : InputManager.InputDeviceListener {
                     when (assignment) {
                         is InputConfig.Assignment.Axis -> device.getMotionRange(assignment.axisCode) != null
                         is InputConfig.Assignment.Key -> device.hasKeys(assignment.keyCode)[0]
+                        is InputConfig.Assignment.KeyCombo -> device.hasKeys(*assignment.keyCodes.toIntArray()).all { supported -> supported }
                         InputConfig.Assignment.None -> false
                     }
                 }

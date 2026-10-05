@@ -25,12 +25,68 @@ class InputSetupViewModel @Inject constructor(private val settingsRepository: Se
     private val _onInputAssignedEvent = EventSharedFlow<Input>()
     val onInputAssignedEvent = _onInputAssignedEvent.asSharedFlow()
 
+    // Keys used while capturing a key combination for a frontend input (hotkey)
+    private val heldKeys = HashSet<Int>()
+    private val capturedComboKeys = LinkedHashSet<Int>()
+
     fun startInputAssignment(input: Input) {
+        resetComboCapture()
         _inputUnderAssignment.value = input
     }
 
     fun stopInputAssignment() {
+        resetComboCapture()
         _inputUnderAssignment.value = null
+    }
+
+    /**
+     * Whether a key combination is currently being captured (at least one key is being held down).
+     */
+    fun isCapturingKeyCombo(): Boolean {
+        return heldKeys.isNotEmpty()
+    }
+
+    /**
+     * Handles a key press while an input is being assigned. System inputs are assigned immediately to the first key that is pressed. Frontend
+     * inputs (hotkeys) wait until all the pressed keys are released, which allows multiple keys to be captured as a combination.
+     */
+    fun onAssignmentKeyDown(key: Int) {
+        val input = _inputUnderAssignment.value ?: return
+        if (input.isSystemInput) {
+            updateInputAssignedKey(key)
+        } else {
+            heldKeys.add(key)
+            capturedComboKeys.add(key)
+        }
+    }
+
+    fun onAssignmentKeyUp(key: Int) {
+        val input = _inputUnderAssignment.value ?: return
+        if (input.isSystemInput) {
+            return
+        }
+
+        heldKeys.remove(key)
+        if (heldKeys.isEmpty() && capturedComboKeys.isNotEmpty()) {
+            val keys = capturedComboKeys.toSet()
+            resetComboCapture()
+            if (keys.size == 1) {
+                updateInputAssignedKey(keys.first())
+            } else {
+                updateInputAssignedKeyCombo(keys)
+            }
+        }
+    }
+
+    private fun resetComboCapture() {
+        heldKeys.clear()
+        capturedComboKeys.clear()
+    }
+
+    private fun updateInputAssignedKeyCombo(keys: Set<Int>) {
+        val inputUnderAssignment = _inputUnderAssignment.value ?: return
+        setInputAssignment(inputUnderAssignment, InputConfig.Assignment.KeyCombo(null, keys))
+        focusOnNextInput(inputUnderAssignment)
     }
 
     fun updateInputAssignedKey(key: Int) {
@@ -60,29 +116,15 @@ class InputSetupViewModel @Inject constructor(private val settingsRepository: Se
                     val current = this[inputIndex]
                     var primary = current.assignment
                     var secondary = current.altAssignment
-                    when (assignment) {
-                        InputConfig.Assignment.None -> {
-                            primary = InputConfig.Assignment.None
-                            secondary = InputConfig.Assignment.None
-                        }
-                        is InputConfig.Assignment.Key -> {
-                            if (primary == InputConfig.Assignment.None || primary == assignment) {
-                                primary = assignment
-                            } else if (secondary == InputConfig.Assignment.None || secondary == assignment) {
-                                secondary = assignment
-                            } else {
-                                secondary = assignment
-                            }
-                        }
-                        is InputConfig.Assignment.Axis -> {
-                            if (primary == InputConfig.Assignment.None|| primary == assignment) {
-                                primary = assignment
-                            } else if (secondary == InputConfig.Assignment.None || secondary == assignment) {
-                                secondary = assignment
-                            } else {
-                                secondary = assignment
-                            }
-                        }
+                    if (assignment == InputConfig.Assignment.None) {
+                        primary = InputConfig.Assignment.None
+                        secondary = InputConfig.Assignment.None
+                    } else if (primary == InputConfig.Assignment.None || primary == assignment) {
+                        primary = assignment
+                    } else if (secondary == InputConfig.Assignment.None || secondary == assignment) {
+                        secondary = assignment
+                    } else {
+                        secondary = assignment
                     }
                     this[inputIndex] = current.copy(assignment = primary, altAssignment = secondary)
                 }.also {
@@ -90,6 +132,7 @@ class InputSetupViewModel @Inject constructor(private val settingsRepository: Se
                 }
             }
         }
+        resetComboCapture()
         _inputUnderAssignment.value = null
     }
 

@@ -30,6 +30,13 @@ data class InputConfigDto(
         ) : AssignmentDto()
 
         @Serializable
+        @SerialName("keyCombo")
+        class KeyCombo(
+            override val deviceId: Int?,
+            @SerialName("keyCodes") val keyCodes: List<Int>,
+        ) : AssignmentDto()
+
+        @Serializable
         @SerialName("axis")
         class Axis(
             override val deviceId: Int?,
@@ -42,33 +49,35 @@ data class InputConfigDto(
         fun fromInputConfig(inputConfig: InputConfig): InputConfigDto {
             return InputConfigDto(
                 input = inputConfig.input,
-                assignment = when (inputConfig.assignment) {
-                    is InputConfig.Assignment.None -> AssignmentDto.None
-                    is InputConfig.Assignment.Key -> AssignmentDto.Key(inputConfig.assignment.deviceId, inputConfig.assignment.keyCode)
-                    is InputConfig.Assignment.Axis -> AssignmentDto.Axis(inputConfig.assignment.deviceId, inputConfig.assignment.axisCode, inputConfig.assignment.direction)
-                },
-                altAssignment = when (inputConfig.altAssignment) {
-                    is InputConfig.Assignment.None -> AssignmentDto.None
-                    is InputConfig.Assignment.Key -> AssignmentDto.Key(inputConfig.altAssignment.deviceId, inputConfig.altAssignment.keyCode)
-                    is InputConfig.Assignment.Axis -> AssignmentDto.Axis(inputConfig.altAssignment.deviceId, inputConfig.altAssignment.axisCode, inputConfig.altAssignment.direction)
-                }
+                assignment = assignmentToDto(inputConfig.assignment),
+                altAssignment = assignmentToDto(inputConfig.altAssignment),
             )
+        }
+
+        private fun assignmentToDto(assignment: InputConfig.Assignment): AssignmentDto {
+            return when (assignment) {
+                is InputConfig.Assignment.None -> AssignmentDto.None
+                is InputConfig.Assignment.Key -> AssignmentDto.Key(assignment.deviceId, assignment.keyCode)
+                is InputConfig.Assignment.KeyCombo -> AssignmentDto.KeyCombo(assignment.deviceId, assignment.keyCodes.toList())
+                is InputConfig.Assignment.Axis -> AssignmentDto.Axis(assignment.deviceId, assignment.axisCode, assignment.direction)
+            }
         }
     }
 
     fun toInputConfig(): InputConfig {
         return InputConfig(
             input = input,
-            assignment = when (assignment) {
-                is AssignmentDto.None -> InputConfig.Assignment.None
-                is AssignmentDto.Key -> InputConfig.Assignment.Key(assignment.deviceId, assignment.keyCode)
-                is AssignmentDto.Axis -> InputConfig.Assignment.Axis(assignment.deviceId, assignment.axisCode, assignment.direction)
-            },
-            altAssignment = when (altAssignment) {
-                is AssignmentDto.None -> InputConfig.Assignment.None
-                is AssignmentDto.Key -> InputConfig.Assignment.Key(altAssignment.deviceId, altAssignment.keyCode)
-                is AssignmentDto.Axis -> InputConfig.Assignment.Axis(altAssignment.deviceId, altAssignment.axisCode, altAssignment.direction)
-            }
+            assignment = assignmentFromDto(assignment),
+            altAssignment = assignmentFromDto(altAssignment),
         )
+    }
+
+    private fun assignmentFromDto(dto: AssignmentDto): InputConfig.Assignment {
+        return when (dto) {
+            is AssignmentDto.None -> InputConfig.Assignment.None
+            is AssignmentDto.Key -> InputConfig.Assignment.Key(dto.deviceId, dto.keyCode)
+            is AssignmentDto.KeyCombo -> InputConfig.Assignment.KeyCombo(dto.deviceId, dto.keyCodes.toSet())
+            is AssignmentDto.Axis -> InputConfig.Assignment.Axis(dto.deviceId, dto.axisCode, dto.direction)
+        }
     }
 }
