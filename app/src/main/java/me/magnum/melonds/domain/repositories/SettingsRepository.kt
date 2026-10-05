@@ -54,6 +54,7 @@ interface SettingsRepository {
     fun getControllerConfiguration(): ControllerConfiguration
     fun observeControllerConfiguration(): StateFlow<ControllerConfiguration>
     fun getSelectedLayoutId(): UUID
+    fun getLayoutPresetId(preset: Int): UUID?
     fun getSoftInputBehaviour(): Flow<SoftInputBehaviour>
     fun isTouchHapticFeedbackEnabled(): Flow<Boolean>
     fun getTouchHapticFeedbackStrength(): Int
@@ -81,6 +82,7 @@ interface SettingsRepository {
     fun setRomSortingMode(sortingMode: SortingMode)
     fun setRomSortingOrder(sortingOrder: SortingOrder)
     fun setSelectedLayoutId(layoutId: UUID)
+    fun setLayoutPresetId(preset: Int, layoutId: UUID?)
 
     fun observeRenderConfiguration(): Flow<RendererConfiguration>
 }

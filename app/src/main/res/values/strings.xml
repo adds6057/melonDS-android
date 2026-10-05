@@ -357,6 +357,13 @@
     <string name="input_swap_screens">Swap Screens</string>
     <string name="input_quick_save">Quick Save</string>
     <string name="input_quick_load">Quick Load</string>
+    <string name="input_toggle_layout_preset">Toggle Layout Preset</string>
+    <string name="layout_preset_1">Layout preset 1</string>
+    <string name="layout_preset_2">Layout preset 2</string>
+    <string name="layout_preset_not_set">Not set</string>
+    <string name="layout_preset_1_selected">Layout preset 1</string>
+    <string name="layout_preset_2_selected">Layout preset 2</string>
+    <string name="layout_presets_not_configured">Set both layout presets in Settings &gt; Input first</string>
 
     <string name="layouts">Layouts</string>
     <string name="layouts_summary">Manage custom layout configurations</string>

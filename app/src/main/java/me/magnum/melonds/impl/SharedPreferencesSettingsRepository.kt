@@ -437,6 +437,16 @@ class SharedPreferencesSettingsRepository(
         return id?.let { UUID.fromString(it) } ?: LayoutConfiguration.DEFAULT_ID
     }
 
+    override fun getLayoutPresetId(preset: Int): UUID? {
+        return preferences.getString("layout_preset_${preset}_id", null)?.let {
+            try {
+                UUID.fromString(it)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
+    }
+
     override fun getSoftInputBehaviour(): Flow<SoftInputBehaviour> {
         return getOrCreatePreferenceSharedFlow("soft_input_behaviour") {
             val preference = preferences.getString("soft_input_behaviour", "hide_system_buttons_when_controller_connected")
@@ -564,6 +574,16 @@ class SharedPreferencesSettingsRepository(
     override fun setSelectedLayoutId(layoutId: UUID) {
         preferences.edit {
             putString("input_layout_id", layoutId.toString())
+        }
+    }
+
+    override fun setLayoutPresetId(preset: Int, layoutId: UUID?) {
+        preferences.edit {
+            if (layoutId == null) {
+                remove("layout_preset_${preset}_id")
+            } else {
+                putString("layout_preset_${preset}_id", layoutId.toString())
+            }
         }
     }
 

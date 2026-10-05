@@ -118,6 +118,9 @@ class EmulatorViewModel @Inject constructor(
 
     private val _layout = MutableStateFlow<LayoutConfiguration?>(null)
 
+    // Layout selected at runtime through the layout preset hotkey. Takes priority over the global and ROM layouts for the current session
+    private val layoutPresetOverrideId = MutableStateFlow<UUID?>(null)
+
     private val _currentLayout = uiLayoutProvider.currentLayout.shareIn(viewModelScope, SharingStarted.Lazily)
 
     private val _runtimeLayout = MutableStateFlow<RuntimeInputLayoutConfiguration?>(null)
@@ -642,6 +645,7 @@ class EmulatorViewModel @Inject constructor(
         _mainScreenBackground.value = RuntimeBackground.None
         _secondaryScreenBackground.value = RuntimeBackground.None
         _layout.value = null
+        layoutPresetOverrideId.value = null
     }
 
     private fun startObservingEmulatorEvents() {
@@ -719,7 +723,7 @@ class EmulatorViewModel @Inject constructor(
         }
 
         sessionCoroutineScope.launch {
-            combine(layoutFlow, ensureEmulatorIsRunning()) { layout, _ ->
+            combine(applyLayoutPresetOverride(layoutFlow), ensureEmulatorIsRunning()) { layout, _ ->
                 layout
             }.collect(_layout)
         }
@@ -737,7 +741,7 @@ class EmulatorViewModel @Inject constructor(
         _layout.value = null
 
         sessionCoroutineScope.launch {
-            combine(getGlobalLayoutFlow(), ensureEmulatorIsRunning()) { layout, _ ->
+            combine(applyLayoutPresetOverride(getGlobalLayoutFlow()), ensureEmulatorIsRunning()) { layout, _ ->
                 layout
             }.collect(_layout)
         }
@@ -749,6 +753,42 @@ class EmulatorViewModel @Inject constructor(
         } else {
             val background = backgroundsRepository.getBackground(backgroundId)
             RuntimeBackground(background, mode)
+        }
+    }
+
+    private fun applyLayoutPresetOverride(baseLayoutFlow: Flow<LayoutConfiguration>): Flow<LayoutConfiguration> {
+        return layoutPresetOverrideId.flatMapLatest { overrideId ->
+            if (overrideId == null) {
+                baseLayoutFlow
+            } else {
+                // If the preset layout stops existing, fall back to the base layout
+                layoutsRepository.observeLayout(overrideId)
+                    .onCompletion {
+                        emitAll(baseLayoutFlow)
+                    }
+            }
+        }
+    }
+
+    /**
+     * Alternates between the two layout presets configured in the settings. If the current layout is preset 1, switches to preset 2. In any other
+     * case, switches to preset 1.
+     */
+    fun toggleLayoutPreset() {
+        val preset1 = settingsRepository.getLayoutPresetId(1)
+        val preset2 = settingsRepository.getLayoutPresetId(2)
+        if (preset1 == null || preset2 == null) {
+            _toastEvent.tryEmit(ToastEvent.LayoutPresetsNotConfigured)
+            return
+        }
+
+        val currentLayoutId = layoutPresetOverrideId.value ?: _layout.value?.id
+        if (currentLayoutId == preset1) {
+            layoutPresetOverrideId.value = preset2
+            _toastEvent.tryEmit(ToastEvent.LayoutPreset2Selected)
+        } else {
+            layoutPresetOverrideId.value = preset1
+            _toastEvent.tryEmit(ToastEvent.LayoutPreset1Selected)
         }
     }
 

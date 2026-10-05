@@ -15,4 +15,7 @@ sealed class ToastEvent {
     data object CannotSwitchRetroAchievementsMode : ToastEvent()
     data object GbaModeNotSupported : ToastEvent()
     data object InternalError : ToastEvent()
+    data object LayoutPresetsNotConfigured : ToastEvent()
+    data object LayoutPreset1Selected : ToastEvent()
+    data object LayoutPreset2Selected : ToastEvent()
 }

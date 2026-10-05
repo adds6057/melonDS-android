@@ -176,6 +176,11 @@ private fun Input(
                                 val keyCodeString = KeyEvent.keyCodeToString(assignment.keyCode)
                                 keyCodeString.replace("KEYCODE", "").replace("_", " ").trim()
                             }
+                            is InputConfig.Assignment.KeyCombo -> {
+                                assignment.keyCodes.joinToString(" + ") { keyCode ->
+                                    KeyEvent.keyCodeToString(keyCode).replace("KEYCODE", "").replace("_", " ").trim()
+                                }
+                            }
                             is InputConfig.Assignment.Axis -> {
                                 val axisString = MotionEvent.axisToString(assignment.axisCode)
                                 val axisPrettyName = axisString.replace("_", " ").trim()
@@ -261,6 +266,7 @@ private fun getInputName(input: Input): String? {
         Input.QUICK_SAVE -> R.string.input_quick_save
         Input.QUICK_LOAD -> R.string.input_quick_load
         Input.REWIND -> R.string.rewind
+        Input.TOGGLE_LAYOUT_PRESET -> R.string.input_toggle_layout_preset
         else -> return null
     }
 

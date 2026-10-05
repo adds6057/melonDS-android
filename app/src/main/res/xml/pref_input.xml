@@ -15,6 +15,16 @@
         android:summary="@string/layouts_summary"
         app:iconSpaceReserved="false" />
 
+    <Preference
+        android:key="input_layout_preset_1"
+        android:title="@string/layout_preset_1"
+        app:iconSpaceReserved="false" />
+
+    <Preference
+        android:key="input_layout_preset_2"
+        android:title="@string/layout_preset_2"
+        app:iconSpaceReserved="false" />
+
     <me.magnum.melonds.ui.settings.preferences.SoftwareInputBehaviourPreference
         android:key="soft_input_behaviour"
         android:title="@string/soft_input_behaviour"

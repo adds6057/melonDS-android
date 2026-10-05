@@ -238,6 +238,10 @@ class EmulatorActivity : AppCompatActivity() {
         override fun onRewind() {
             viewModel.onOpenRewind()
         }
+
+        override fun onToggleLayoutPreset() {
+            viewModel.toggleLayoutPreset()
+        }
     }
     private val settingsLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.onSettingsChanged()
@@ -477,6 +481,9 @@ class EmulatorActivity : AppCompatActivity() {
                         ToastEvent.CannotSwitchRetroAchievementsMode -> R.string.retro_achievements_relaunch_to_apply_settings to Toast.LENGTH_LONG
                         ToastEvent.GbaModeNotSupported -> R.string.emulator_stop_gba_mode_unsupported to Toast.LENGTH_SHORT
                         ToastEvent.InternalError -> R.string.emulator_stop_internal_error to Toast.LENGTH_LONG
+                        ToastEvent.LayoutPresetsNotConfigured -> R.string.layout_presets_not_configured to Toast.LENGTH_LONG
+                        ToastEvent.LayoutPreset1Selected -> R.string.layout_preset_1_selected to Toast.LENGTH_SHORT
+                        ToastEvent.LayoutPreset2Selected -> R.string.layout_preset_2_selected to Toast.LENGTH_SHORT
                     }
 
                     Toast.makeText(this@EmulatorActivity, message, duration).show()
@@ -818,6 +825,9 @@ class EmulatorActivity : AppCompatActivity() {
     }
 
     private fun setupInputHandling(controllerConfiguration: ControllerConfiguration) {
+        if (::nativeInputListener.isInitialized) {
+            (nativeInputListener as? InputProcessor)?.release()
+        }
         nativeInputListener = InputProcessor(controllerConfiguration, melonTouchHandler, frontendInputHandler)
     }
 
